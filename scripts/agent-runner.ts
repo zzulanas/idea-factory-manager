@@ -105,6 +105,71 @@ async function runAgent(task: schema.AgentTask): Promise<{ success: boolean; out
   });
 }
 
+async function runGitCommand(args: string[], cwd: string): Promise<{ success: boolean; output: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn('git', args, { cwd });
+    let output = '';
+
+    proc.stdout.on('data', (data) => { output += data.toString(); });
+    proc.stderr.on('data', (data) => { output += data.toString(); });
+
+    proc.on('close', (code) => {
+      resolve({ success: code === 0, output });
+    });
+
+    proc.on('error', (err) => {
+      resolve({ success: false, output: err.message });
+    });
+  });
+}
+
+async function commitAndPush(task: schema.AgentTask): Promise<{ success: boolean; branchName?: string; commitHash?: string; error?: string }> {
+  const cwd = task.projectPath;
+  console.log(`[Git] Checking for changes in ${cwd}`);
+
+  // Check if there are any changes
+  const status = await runGitCommand(['status', '--porcelain'], cwd);
+  if (!status.output.trim()) {
+    console.log('[Git] No changes to commit');
+    return { success: true };
+  }
+
+  console.log(`[Git] Changes detected:\n${status.output}`);
+
+  // Get current branch name
+  const branchResult = await runGitCommand(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const branchName = branchResult.output.trim();
+  console.log(`[Git] Current branch: ${branchName}`);
+
+  // Stage all changes (excluding .opencode/)
+  const addResult = await runGitCommand(['add', '-A'], cwd);
+  if (!addResult.success) {
+    return { success: false, error: `Failed to stage changes: ${addResult.output}` };
+  }
+
+  // Create commit with task title
+  const commitMessage = `feat: ${task.title}\n\nTask ID: ${task.id}\nAutomated commit by agent-runner`;
+  const commitResult = await runGitCommand(['commit', '-m', commitMessage], cwd);
+  if (!commitResult.success) {
+    return { success: false, error: `Failed to commit: ${commitResult.output}` };
+  }
+
+  // Get commit hash
+  const hashResult = await runGitCommand(['rev-parse', 'HEAD'], cwd);
+  const commitHash = hashResult.output.trim().substring(0, 7);
+  console.log(`[Git] Committed: ${commitHash}`);
+
+  // Push to remote
+  console.log(`[Git] Pushing to origin/${branchName}`);
+  const pushResult = await runGitCommand(['push', 'origin', branchName], cwd);
+  if (!pushResult.success) {
+    return { success: false, branchName, commitHash, error: `Failed to push: ${pushResult.output}` };
+  }
+
+  console.log(`[Git] ✅ Pushed successfully`);
+  return { success: true, branchName, commitHash };
+}
+
 async function processTask(task: schema.AgentTask) {
   console.log(`\n${'='.repeat(60)}`);
   console.log(`[Runner] Processing task: ${task.id}`);
@@ -115,10 +180,27 @@ async function processTask(task: schema.AgentTask) {
 
   try {
     const result = await runAgent(task);
-    
+
     if (result.success) {
-      await updateTaskStatus(task.id, 'completed', { output: result.output });
-      console.log(`\n[Runner] ✅ Task completed successfully`);
+      // Commit and push changes
+      const gitResult = await commitAndPush(task);
+
+      if (gitResult.success) {
+        await updateTaskStatus(task.id, 'completed', {
+          output: result.output,
+          branchName: gitResult.branchName,
+          commitHash: gitResult.commitHash,
+        });
+        console.log(`\n[Runner] ✅ Task completed and pushed successfully`);
+      } else {
+        await updateTaskStatus(task.id, 'failed', {
+          output: result.output,
+          error: gitResult.error,
+          branchName: gitResult.branchName,
+          commitHash: gitResult.commitHash,
+        });
+        console.log(`\n[Runner] ❌ Task completed but git failed: ${gitResult.error}`);
+      }
     } else {
       await updateTaskStatus(task.id, 'failed', { output: result.output, error: result.error });
       console.log(`\n[Runner] ❌ Task failed: ${result.error}`);
