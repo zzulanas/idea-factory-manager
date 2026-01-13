@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { router, publicProcedure } from '../trpc';
 import { db } from '@/lib/db';
 import { agentTasks } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, or, ilike } from 'drizzle-orm';
 
 export const tasksRouter = router({
   // Get all tasks
@@ -11,6 +11,34 @@ export const tasksRouter = router({
       orderBy: [desc(agentTasks.createdAt)],
     });
   }),
+
+  // Search tasks
+  search: publicProcedure
+    .input(z.object({ 
+      query: z.string().min(1),
+      projectPath: z.string().optional()
+    }))
+    .query(async ({ input }) => {
+      const searchTerm = `%${input.query}%`;
+      
+      let whereConditions = or(
+        ilike(agentTasks.title, searchTerm),
+        ilike(agentTasks.prompt, searchTerm)
+      );
+
+      // If projectPath is provided, add it to the search conditions
+      if (input.projectPath) {
+        whereConditions = or(
+          whereConditions,
+          eq(agentTasks.projectPath, input.projectPath)
+        );
+      }
+
+      return await db.query.agentTasks.findMany({
+        where: whereConditions,
+        orderBy: [desc(agentTasks.createdAt)],
+      });
+    }),
 
   // Get a single task by ID
   getById: publicProcedure

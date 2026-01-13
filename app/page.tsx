@@ -29,9 +29,17 @@ export default function Home() {
   const [selectedProject, setSelectedProject] = useState("");
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
 
   const utils = trpc.useUtils();
-  const { data: tasks, isLoading } = trpc.tasks.list.useQuery();
+  const { data: tasks, isLoading } = trpc.tasks.list.useQuery(undefined, {
+    enabled: !isSearching
+  });
+  const { data: searchResults, isLoading: isSearchLoading } = trpc.tasks.search.useQuery(
+    { query: searchQuery },
+    { enabled: isSearching && searchQuery.length > 0 }
+  );
   const { data: projects, isLoading: projectsLoading } = trpc.dokploy.getProjects.useQuery();
 
   const createTask = trpc.tasks.create.useMutation({
@@ -82,6 +90,14 @@ export default function Home() {
     if (!newProjectName.trim()) return;
     createProject.mutate({ name: newProjectName });
   };
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    setIsSearching(query.length > 0);
+  };
+
+  const displayTasks = isSearching ? searchResults : tasks;
+  const displayLoading = isSearching ? isSearchLoading : isLoading;
 
   return (
     <div className="min-h-screen bg-gradient-mesh">
@@ -200,42 +216,52 @@ export default function Home() {
 
         {/* Task List */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <h2 className="text-xl font-semibold">Tasks</h2>
-            <Badge variant="outline">{tasks?.length ?? 0} total</Badge>
+            <div className="flex items-center gap-2">
+              <Input
+                variant="glass"
+                placeholder="Search tasks..."
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="w-full sm:w-64"
+              />
+              <Badge variant="outline">{displayTasks?.length ?? 0} {isSearching ? 'found' : 'total'}</Badge>
+            </div>
           </div>
 
-          {isLoading ? (
+          {displayLoading ? (
             <Card variant="glass-subtle">
               <CardContent className="py-8 text-center text-muted-foreground">
-                Loading tasks...
+                {isSearching ? 'Searching...' : 'Loading tasks...'}
               </CardContent>
             </Card>
-          ) : tasks?.length === 0 ? (
+          ) : displayTasks?.length === 0 ? (
             <Card variant="glass-subtle">
               <CardContent className="py-8 text-center text-muted-foreground">
-                No tasks yet. Create one above!
+                {isSearching ? 'No tasks found matching your search.' : 'No tasks yet. Create one above!'}
               </CardContent>
             </Card>
           ) : (
-            tasks?.map((task) => (
+            displayTasks?.map((task) => (
               <Card key={task.id} variant="glass">
                 <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span>{statusIcons[task.status]}</span>
                         <CardTitle className="text-lg truncate">{task.title}</CardTitle>
+                        <Badge className={`${statusColors[task.status]} shrink-0 sm:hidden text-[10px] px-2 py-0.5`}>{task.status}</Badge>
                       </div>
                       <CardDescription className="line-clamp-2">{task.prompt}</CardDescription>
                     </div>
-                    <Badge className={statusColors[task.status]}>{task.status}</Badge>
+                    <Badge className={`${statusColors[task.status]} shrink-0 hidden sm:inline-flex`}>{task.status}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="truncate max-w-[50%]">{task.projectPath}</span>
-                    <span>{new Date(task.createdAt).toLocaleString()}</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2 text-xs text-muted-foreground">
+                    <span className="truncate max-w-full sm:max-w-[50%]">{task.projectPath}</span>
+                    <span className="shrink-0">{new Date(task.createdAt).toLocaleString()}</span>
                   </div>
                   {task.error && (
                     <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-600">
