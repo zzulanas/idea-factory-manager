@@ -61,12 +61,9 @@ export const storage = {
       const response = await s3Client.send(command);
       if (!response.Body) return null;
 
-      // Convert stream to buffer
-      const chunks: Uint8Array[] = [];
-      for await (const chunk of response.Body as ReadableStream) {
-        chunks.push(chunk);
-      }
-      return Buffer.concat(chunks);
+      // Convert stream to buffer using transformToByteArray (AWS SDK v3)
+      const byteArray = await response.Body.transformToByteArray();
+      return Buffer.from(byteArray);
     } catch (error: unknown) {
       if (error && typeof error === 'object' && 'name' in error && error.name === 'NoSuchKey') return null;
       throw error;
