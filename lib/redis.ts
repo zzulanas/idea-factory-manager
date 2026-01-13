@@ -37,7 +37,7 @@ export const cache = {
   },
 
   // Set a value in cache with optional TTL (in seconds)
-  async set(key: string, value: any, ttl?: number): Promise<void> {
+  async set(key: string, value: unknown, ttl?: number): Promise<void> {
     const serialized = typeof value === 'string' ? value : JSON.stringify(value);
     if (ttl) {
       await redis.setex(key, ttl, serialized);

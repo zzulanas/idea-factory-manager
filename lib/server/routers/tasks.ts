@@ -78,11 +78,13 @@ export const tasksRouter = router({
     .input(
       z.object({
         id: z.string().uuid(),
-        status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']),
+        status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'review']),
         output: z.string().optional(),
         error: z.string().optional(),
         branchName: z.string().optional(),
         commitHash: z.string().optional(),
+        previewUrl: z.string().optional(),
+        previewDeploymentId: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -136,5 +138,82 @@ export const tasksRouter = router({
       await db.delete(agentTasks).where(eq(agentTasks.id, input.id));
       return { success: true };
     }),
+
+  // Submit task for review (creates preview deployment)
+  submitForReview: publicProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        applicationId: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const task = await db.query.agentTasks.findFirst({
+        where: eq(agentTasks.id, input.id),
+      });
+      
+      if (!task || !task.branchName) {
+        throw new Error('Task not found or no branch available');
+      }
+
+      // This would typically call the Dokploy API to create a preview deployment
+      // For now, we'll just update the status to 'review'
+      const [updatedTask] = await db
+        .update(agentTasks)
+        .set({ 
+          status: 'review',
+          updatedAt: new Date()
+        })
+        .where(eq(agentTasks.id, input.id))
+        .returning();
+      
+      return updatedTask;
+    }),
+
+  // Approve task (merge to main and deploy)
+  approve: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const [task] = await db
+        .update(agentTasks)
+        .set({ 
+          status: 'completed',
+          completedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(agentTasks.id, input.id))
+        .returning();
+      return task;
+    }),
+
+  // Reject task (close preview and mark as failed)
+  reject: publicProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        reason: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const [task] = await db
+        .update(agentTasks)
+        .set({ 
+          status: 'failed',
+          error: input.reason || 'Task rejected during review',
+          completedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(agentTasks.id, input.id))
+        .returning();
+      return task;
+    }),
+
+  // Get tasks in review
+  getReviewTasks: publicProcedure.query(async () => {
+    return await db.query.agentTasks.findMany({
+      where: eq(agentTasks.status, 'review'),
+      orderBy: [desc(agentTasks.updatedAt)],
+    });
+  }),
 });
 

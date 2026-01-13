@@ -63,12 +63,12 @@ export const storage = {
 
       // Convert stream to buffer
       const chunks: Uint8Array[] = [];
-      for await (const chunk of response.Body as any) {
+      for await (const chunk of response.Body as ReadableStream) {
         chunks.push(chunk);
       }
       return Buffer.concat(chunks);
-    } catch (error: any) {
-      if (error.name === 'NoSuchKey') return null;
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'NoSuchKey') return null;
       throw error;
     }
   },

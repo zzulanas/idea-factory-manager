@@ -43,7 +43,14 @@ async function getNextTask() {
 async function updateTaskStatus(
   id: string, 
   status: schema.TaskStatus, 
-  extra?: { output?: string; error?: string; branchName?: string; commitHash?: string }
+  extra?: { 
+    output?: string; 
+    error?: string; 
+    branchName?: string; 
+    commitHash?: string;
+    previewUrl?: string;
+    previewDeploymentId?: string;
+  }
 ) {
   const updateData: Record<string, unknown> = { 
     status, 
@@ -178,40 +185,57 @@ async function commitAndPush(task: schema.AgentTask): Promise<{ success: boolean
   return { success: true, branchName, commitHash };
 }
 
-async function triggerDokployDeploy(projectPath: string): Promise<{ success: boolean; error?: string }> {
+async function createPreviewDeployment(
+  projectPath: string, 
+  branchName: string, 
+  commitHash: string
+): Promise<{ success: boolean; previewUrl?: string; deploymentId?: string; error?: string }> {
   const appId = PROJECT_APP_IDS[projectPath];
   if (!appId) {
-    console.log(`[Deploy] No Dokploy app ID mapped for ${projectPath}`);
+    console.log(`[Preview] No Dokploy app ID mapped for ${projectPath}`);
     return { success: true }; // Not an error, just no deployment configured
   }
 
   if (!DOKPLOY_API_KEY) {
-    console.log('[Deploy] DOKPLOY_API_KEY not set, skipping deployment');
+    console.log('[Preview] DOKPLOY_API_KEY not set, skipping preview deployment');
     return { success: true };
   }
 
-  console.log(`[Deploy] Triggering Dokploy deployment for app ${appId}`);
+  console.log(`[Preview] Creating preview deployment for app ${appId}, branch ${branchName}`);
 
   try {
-    const response = await fetch(`${DOKPLOY_URL}/api/trpc/application.deploy`, {
+    const response = await fetch(`${DOKPLOY_URL}/api/trpc/application.createPreview`, {
       method: 'POST',
       headers: {
         'x-api-key': DOKPLOY_API_KEY,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ json: { applicationId: appId } }),
+      body: JSON.stringify({ 
+        json: { 
+          applicationId: appId, 
+          branch: branchName,
+          commitHash: commitHash
+        } 
+      }),
     });
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, error: `Deploy failed: ${response.status} ${text}` };
+      return { success: false, error: `Preview deployment failed: ${response.status} ${text}` };
     }
 
-    console.log('[Deploy] ✅ Deployment triggered successfully');
-    return { success: true };
+    const data = await response.json();
+    const deployment = data.result?.data?.json;
+    
+    console.log('[Preview] ✅ Preview deployment created successfully');
+    return { 
+      success: true, 
+      previewUrl: deployment?.url,
+      deploymentId: deployment?.deploymentId
+    };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: `Deploy error: ${errorMsg}` };
+    return { success: false, error: `Preview deployment error: ${errorMsg}` };
   }
 }
 
@@ -230,18 +254,41 @@ async function processTask(task: schema.AgentTask) {
       // Commit and push changes
       const gitResult = await commitAndPush(task);
 
-      if (gitResult.success) {
-        // Trigger Dokploy deployment if changes were pushed
-        if (gitResult.commitHash) {
-          await triggerDokployDeploy(task.projectPath);
-        }
+      if (gitResult.success && gitResult.commitHash) {
+        // Create preview deployment instead of direct deployment
+        const previewResult = await createPreviewDeployment(
+          task.projectPath, 
+          gitResult.branchName!, 
+          gitResult.commitHash
+        );
 
+        if (previewResult.success) {
+          await updateTaskStatus(task.id, 'review', {
+            output: result.output,
+            branchName: gitResult.branchName,
+            commitHash: gitResult.commitHash,
+            previewUrl: previewResult.previewUrl,
+            previewDeploymentId: previewResult.deploymentId,
+          });
+          console.log(`\n[Runner] ✅ Task completed and submitted for review`);
+          if (previewResult.previewUrl) {
+            console.log(`[Runner] Preview URL: ${previewResult.previewUrl}`);
+          }
+        } else {
+          await updateTaskStatus(task.id, 'failed', {
+            output: result.output,
+            error: previewResult.error,
+            branchName: gitResult.branchName,
+            commitHash: gitResult.commitHash,
+          });
+          console.log(`\n[Runner] ❌ Task completed but preview deployment failed: ${previewResult.error}`);
+        }
+      } else if (gitResult.success) {
+        // No changes to commit, mark as completed
         await updateTaskStatus(task.id, 'completed', {
           output: result.output,
-          branchName: gitResult.branchName,
-          commitHash: gitResult.commitHash,
         });
-        console.log(`\n[Runner] ✅ Task completed and pushed successfully`);
+        console.log(`\n[Runner] ✅ Task completed (no changes to commit)`);
       } else {
         await updateTaskStatus(task.id, 'failed', {
           output: result.output,

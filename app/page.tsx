@@ -5,9 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
+import { ReviewDashboard } from "@/components/ReviewDashboard";
+import { ReviewWorkflow } from "@/components/ReviewWorkflow";
 import { trpc } from "@/lib/trpc/client";
 import { useState } from "react";
-import { Clock, RotateCw, CheckCircle, XCircle, Ban, Factory } from "lucide-react";
+import { Clock, RotateCw, CheckCircle, XCircle, Ban, Factory, Eye } from "lucide-react";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-500/20 text-yellow-600 border-yellow-500/30",
@@ -15,6 +17,7 @@ const statusColors: Record<string, string> = {
   completed: "bg-green-500/20 text-green-600 border-green-500/30",
   failed: "bg-red-500/20 text-red-600 border-red-500/30",
   cancelled: "bg-gray-500/20 text-gray-600 border-gray-500/30",
+  review: "bg-orange-500/20 text-orange-600 border-orange-500/30",
 };
 
 const statusIcons = {
@@ -23,6 +26,7 @@ const statusIcons = {
   completed: CheckCircle,
   failed: XCircle,
   cancelled: Ban,
+  review: Eye,
 };
 
 export default function Home() {
@@ -33,6 +37,7 @@ export default function Home() {
   const [newProjectName, setNewProjectName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [activeTab, setActiveTab] = useState<'tasks' | 'review'>('tasks');
 
   const utils = trpc.useUtils();
   const { data: tasks, isLoading } = trpc.tasks.list.useQuery(undefined, {
@@ -43,6 +48,7 @@ export default function Home() {
     { enabled: isSearching && searchQuery.length > 0 }
   );
   const { data: projects, isLoading: projectsLoading } = trpc.dokploy.getProjects.useQuery();
+  const { data: reviewTasks } = trpc.tasks.getReviewTasks.useQuery();
 
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
@@ -217,6 +223,37 @@ export default function Home() {
           </CardContent>
         </Card>
 
+        {/* Tab Navigation */}
+        <div className="flex gap-2 mb-6">
+          <Button
+            variant={activeTab === 'tasks' ? 'default' : 'outline'}
+            onClick={() => setActiveTab('tasks')}
+            className="flex items-center gap-2"
+          >
+            <Factory className="h-4 w-4" />
+            All Tasks
+            {displayTasks && <Badge variant="secondary" className="ml-1">{displayTasks.length}</Badge>}
+          </Button>
+          <Button
+            variant={activeTab === 'review' ? 'default' : 'outline'}
+            onClick={() => setActiveTab('review')}
+            className="flex items-center gap-2"
+          >
+            <Eye className="h-4 w-4" />
+            Review Queue
+            {reviewTasks && reviewTasks.length > 0 && (
+              <Badge variant="secondary" className="ml-1 bg-orange-100 text-orange-800">
+                {reviewTasks.length}
+              </Badge>
+            )}
+          </Button>
+        </div>
+
+        {/* Content based on active tab */}
+        {activeTab === 'review' ? (
+          <ReviewDashboard />
+        ) : (
+          <>
         {/* Task List */}
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -281,6 +318,23 @@ export default function Home() {
                       </pre>
                     </details>
                   )}
+                  
+                  {/* Review Workflow Component */}
+                  {task.status === 'review' && (
+                    <div className="mt-4">
+                      <ReviewWorkflow
+                        taskId={task.id}
+                        status={task.status}
+                        previewUrl={task.previewUrl}
+                        branchName={task.branchName}
+                        onStatusChange={() => {
+                          utils.tasks.list.invalidate();
+                          utils.tasks.getReviewTasks.invalidate();
+                        }}
+                      />
+                    </div>
+                  )}
+                  
                   <div className="flex gap-2 mt-4">
                     {task.status === "pending" && (
                       <Button
@@ -308,6 +362,8 @@ export default function Home() {
             ))
           )}
         </div>
+        </>
+        )}
 
         {/* Footer */}
         <div className="text-center mt-12">

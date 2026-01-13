@@ -7,7 +7,8 @@ export const taskStatusEnum = pgEnum('task_status', [
   'running',
   'completed',
   'failed',
-  'cancelled'
+  'cancelled',
+  'review'
 ]);
 
 // Agent tasks table
@@ -22,6 +23,8 @@ export const agentTasks = pgTable('agent_tasks', {
   error: text('error'),
   branchName: text('branch_name'),
   commitHash: text('commit_hash'),
+  previewUrl: text('preview_url'),
+  previewDeploymentId: text('preview_deployment_id'),
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

@@ -18,6 +18,18 @@ interface DokployApplication {
   customGitUrl: string | null;
   repository: string | null;
   owner: string | null;
+  buildPath: string | null;
+  dockerfile: string | null;
+}
+
+interface DokployPreviewDeployment {
+  deploymentId: string;
+  applicationId: string;
+  branch: string;
+  commitHash: string;
+  status: 'building' | 'running' | 'stopped' | 'error';
+  url: string | null;
+  createdAt: string;
 }
 
 interface DokployEnvironment {
@@ -87,6 +99,60 @@ export const dokployRouter = router({
         body: JSON.stringify({ json: input }),
       });
       return result;
+    }),
+
+  // Create a preview deployment
+  createPreviewDeployment: publicProcedure
+    .input(
+      z.object({
+        applicationId: z.string(),
+        branch: z.string(),
+        commitHash: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const result = await dokployFetch<DokployPreviewDeployment>('application.createPreview', {
+        method: 'POST',
+        body: JSON.stringify({ 
+          json: {
+            applicationId: input.applicationId,
+            branch: input.branch,
+            commitHash: input.commitHash,
+          }
+        }),
+      });
+      return result;
+    }),
+
+  // Get preview deployments for an application
+  getPreviewDeployments: publicProcedure
+    .input(z.object({ applicationId: z.string() }))
+    .query(async ({ input }) => {
+      const deployments = await dokployFetch<DokployPreviewDeployment[]>(
+        `application.previews?input=${encodeURIComponent(JSON.stringify({ json: { applicationId: input.applicationId } }))}`
+      );
+      return deployments;
+    }),
+
+  // Delete a preview deployment
+  deletePreviewDeployment: publicProcedure
+    .input(z.object({ deploymentId: z.string() }))
+    .mutation(async ({ input }) => {
+      await dokployFetch('application.deletePreview', {
+        method: 'POST',
+        body: JSON.stringify({ json: { deploymentId: input.deploymentId } }),
+      });
+      return { success: true };
+    }),
+
+  // Get deployment status
+  getDeploymentStatus: publicProcedure
+    .input(z.object({ deploymentId: z.string() }))
+    .query(async ({ input }) => {
+      const deployment = await dokployFetch<DokployPreviewDeployment>(
+        `application.previewStatus?input=${encodeURIComponent(JSON.stringify({ json: { deploymentId: input.deploymentId } }))}`
+      );
+      return deployment;
     }),
 });
 
