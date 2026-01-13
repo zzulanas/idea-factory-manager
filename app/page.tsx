@@ -92,7 +92,7 @@ export default function Home() {
             🏭 Idea Factory Manager
           </Badge>
           <h1 className="text-4xl font-bold tracking-tight mb-3">
-            Background <span className="text-gradient">Agent Tasks</span>
+            Background <span className="font-mono">Agent Tasks</span>
           </h1>
           <p className="text-muted-foreground">
             Queue coding tasks for the OpenCode agent to execute in the background
