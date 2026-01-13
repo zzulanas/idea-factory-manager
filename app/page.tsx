@@ -26,16 +26,28 @@ const statusIcons: Record<string, string> = {
 export default function Home() {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [projectPath, setProjectPath] = useState("/home/zzula/projects/idea-factory-template");
+  const [selectedProject, setSelectedProject] = useState("");
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
 
   const utils = trpc.useUtils();
   const { data: tasks, isLoading } = trpc.tasks.list.useQuery();
+  const { data: projects, isLoading: projectsLoading } = trpc.dokploy.getProjects.useQuery();
 
   const createTask = trpc.tasks.create.useMutation({
     onSuccess: () => {
       utils.tasks.list.invalidate();
       setTitle("");
       setPrompt("");
+    },
+  });
+
+  const createProject = trpc.dokploy.createProject.useMutation({
+    onSuccess: (newProject) => {
+      utils.dokploy.getProjects.invalidate();
+      setSelectedProject(newProject.projectId);
+      setShowNewProject(false);
+      setNewProjectName("");
     },
   });
 
@@ -47,10 +59,26 @@ export default function Home() {
     onSuccess: () => utils.tasks.list.invalidate(),
   });
 
+  // Get the selected project's git URL for the task
+  const getProjectPath = () => {
+    if (!selectedProject || !projects) return "";
+    const project = projects.find((p) => p.projectId === selectedProject);
+    if (!project || project.applications.length === 0) return "";
+    // Use the first application's git URL or fall back to a local path
+    const app = project.applications[0];
+    return app.gitUrl || `/home/zzula/projects/${project.name.toLowerCase().replace(/\s+/g, '-')}`;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !prompt.trim()) return;
-    createTask.mutate({ title, prompt, projectPath });
+    if (!title.trim() || !prompt.trim() || !selectedProject) return;
+    createTask.mutate({ title, prompt, projectPath: getProjectPath() });
+  };
+
+  const handleCreateProject = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProjectName.trim()) return;
+    createProject.mutate({ name: newProjectName });
   };
 
   return (
@@ -94,17 +122,73 @@ export default function Home() {
                 />
               </div>
               <div>
-                <Input
-                  variant="glass"
-                  placeholder="Project path"
-                  value={projectPath}
-                  onChange={(e) => setProjectPath(e.target.value)}
-                />
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Target Project
+                </label>
+                {showNewProject ? (
+                  <div className="flex gap-2">
+                    <Input
+                      variant="glass"
+                      placeholder="New project name"
+                      value={newProjectName}
+                      onChange={(e) => setNewProjectName(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="gradient"
+                      size="sm"
+                      onClick={handleCreateProject}
+                      disabled={createProject.isPending || !newProjectName.trim()}
+                    >
+                      {createProject.isPending ? "..." : "Create"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowNewProject(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <select
+                      className="flex-1 h-10 glass glass-border rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 bg-transparent"
+                      value={selectedProject}
+                      onChange={(e) => setSelectedProject(e.target.value)}
+                      disabled={projectsLoading}
+                    >
+                      <option value="">
+                        {projectsLoading ? "Loading projects..." : "Select a project"}
+                      </option>
+                      {projects?.map((project) => (
+                        <option key={project.projectId} value={project.projectId}>
+                          {project.name} {project.applications.length > 0 ? `(${project.applications.length} apps)` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowNewProject(true)}
+                    >
+                      + New
+                    </Button>
+                  </div>
+                )}
+                {selectedProject && projects && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Path: {getProjectPath()}
+                  </p>
+                )}
               </div>
               <Button
                 variant="gradient"
                 type="submit"
-                disabled={createTask.isPending || !title.trim() || !prompt.trim()}
+                disabled={createTask.isPending || !title.trim() || !prompt.trim() || !selectedProject}
               >
                 {createTask.isPending ? "Creating..." : "Create Task"}
               </Button>
