@@ -43,3 +43,6 @@ next-env.d.ts
 
 # drizzle
 /db/migrations
+
+# OpenCode agent working directory
+.opencode/
