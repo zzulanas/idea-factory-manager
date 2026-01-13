@@ -701,6 +701,20 @@ npm run db:push
 Cmd+Shift+P → "TypeScript: Restart TS Server"
 ```
 
+## Design System Guidelines
+
+### Icons
+- **Use Lucide React icons instead of emojis** for all UI elements
+- Import icons from `lucide-react` and use the `Icon` component from `@/components/ui/icon`
+- The `Icon` component provides consistent sizing (default h-4 w-4) and styling
+- Example usage:
+```typescript
+import { Icon } from '@/components/ui/icon';
+import { CheckCircle, XCircle } from 'lucide-react';
+
+<Icon icon={CheckCircle} className="text-green-500" />
+```
+
 ## Best Practices
 
 1. **Always use Zod schemas** for input validation in tRPC procedures

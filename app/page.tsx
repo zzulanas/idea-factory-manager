@@ -4,8 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Icon } from "@/components/ui/icon";
 import { trpc } from "@/lib/trpc/client";
 import { useState } from "react";
+import { Clock, RotateCw, CheckCircle, XCircle, Ban, Factory } from "lucide-react";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-500/20 text-yellow-600 border-yellow-500/30",
@@ -15,12 +17,12 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-gray-500/20 text-gray-600 border-gray-500/30",
 };
 
-const statusIcons: Record<string, string> = {
-  pending: "⏳",
-  running: "🔄",
-  completed: "✅",
-  failed: "❌",
-  cancelled: "🚫",
+const statusIcons = {
+  pending: Clock,
+  running: RotateCw,
+  completed: CheckCircle,
+  failed: XCircle,
+  cancelled: Ban,
 };
 
 export default function Home() {
@@ -105,7 +107,8 @@ export default function Home() {
         {/* Header */}
         <div className="text-center mb-12">
           <Badge variant="glass" className="mb-4 px-4 py-1.5">
-            🏭 Idea Factory Manager
+            <Icon icon={Factory} className="mr-2" />
+            Idea Factory Manager
           </Badge>
           <h1 className="text-4xl font-bold tracking-tight mb-3">
             Background <span className="font-mono">Agent Tasks</span>
@@ -249,7 +252,7 @@ export default function Home() {
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span>{statusIcons[task.status]}</span>
+                        <Icon icon={statusIcons[task.status]} className="h-4 w-4 shrink-0" />
                         <CardTitle className="text-lg truncate">{task.title}</CardTitle>
                         <Badge className={`${statusColors[task.status]} shrink-0 sm:hidden text-[10px] px-2 py-0.5`}>{task.status}</Badge>
                       </div>
