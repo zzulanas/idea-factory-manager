@@ -1,0 +1,206 @@
+"use client";
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { trpc } from "@/lib/trpc/client";
+import { useState } from "react";
+
+const statusColors: Record<string, string> = {
+  pending: "bg-yellow-500/20 text-yellow-600 border-yellow-500/30",
+  running: "bg-blue-500/20 text-blue-600 border-blue-500/30",
+  completed: "bg-green-500/20 text-green-600 border-green-500/30",
+  failed: "bg-red-500/20 text-red-600 border-red-500/30",
+  cancelled: "bg-gray-500/20 text-gray-600 border-gray-500/30",
+};
+
+const statusIcons: Record<string, string> = {
+  pending: "⏳",
+  running: "🔄",
+  completed: "✅",
+  failed: "❌",
+  cancelled: "🚫",
+};
+
+export default function Home() {
+  const [title, setTitle] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [projectPath, setProjectPath] = useState("/home/zzula/projects/idea-factory-template");
+
+  const utils = trpc.useUtils();
+  const { data: tasks, isLoading } = trpc.tasks.list.useQuery();
+
+  const createTask = trpc.tasks.create.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate();
+      setTitle("");
+      setPrompt("");
+    },
+  });
+
+  const cancelTask = trpc.tasks.cancel.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate(),
+  });
+
+  const deleteTask = trpc.tasks.delete.useMutation({
+    onSuccess: () => utils.tasks.list.invalidate(),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !prompt.trim()) return;
+    createTask.mutate({ title, prompt, projectPath });
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-mesh">
+      <main className="container mx-auto px-4 py-12 max-w-4xl">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <Badge variant="glass" className="mb-4 px-4 py-1.5">
+            🏭 Idea Factory Manager
+          </Badge>
+          <h1 className="text-4xl font-bold tracking-tight mb-3">
+            Background <span className="text-gradient">Agent Tasks</span>
+          </h1>
+          <p className="text-muted-foreground">
+            Queue coding tasks for the OpenCode agent to execute in the background
+          </p>
+        </div>
+
+        {/* Create Task Form */}
+        <Card variant="glass" className="mb-8">
+          <CardHeader>
+            <CardTitle className="text-xl">New Task</CardTitle>
+            <CardDescription>Create a new task for the agent to work on</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Input
+                  variant="glass"
+                  placeholder="Task title (e.g., Add dark mode toggle)"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+              <div>
+                <textarea
+                  className="w-full min-h-[100px] glass glass-border rounded-xl p-3 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="Describe what you want the agent to do..."
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                />
+              </div>
+              <div>
+                <Input
+                  variant="glass"
+                  placeholder="Project path"
+                  value={projectPath}
+                  onChange={(e) => setProjectPath(e.target.value)}
+                />
+              </div>
+              <Button
+                variant="gradient"
+                type="submit"
+                disabled={createTask.isPending || !title.trim() || !prompt.trim()}
+              >
+                {createTask.isPending ? "Creating..." : "Create Task"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Task List */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Tasks</h2>
+            <Badge variant="outline">{tasks?.length ?? 0} total</Badge>
+          </div>
+
+          {isLoading ? (
+            <Card variant="glass-subtle">
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Loading tasks...
+              </CardContent>
+            </Card>
+          ) : tasks?.length === 0 ? (
+            <Card variant="glass-subtle">
+              <CardContent className="py-8 text-center text-muted-foreground">
+                No tasks yet. Create one above!
+              </CardContent>
+            </Card>
+          ) : (
+            tasks?.map((task) => (
+              <Card key={task.id} variant="glass">
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span>{statusIcons[task.status]}</span>
+                        <CardTitle className="text-lg truncate">{task.title}</CardTitle>
+                      </div>
+                      <CardDescription className="line-clamp-2">{task.prompt}</CardDescription>
+                    </div>
+                    <Badge className={statusColors[task.status]}>{task.status}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="truncate max-w-[50%]">{task.projectPath}</span>
+                    <span>{new Date(task.createdAt).toLocaleString()}</span>
+                  </div>
+                  {task.error && (
+                    <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-600">
+                      {task.error}
+                    </div>
+                  )}
+                  {task.output && task.status === "completed" && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+                        View output
+                      </summary>
+                      <pre className="mt-2 p-3 rounded-lg glass text-xs overflow-x-auto max-h-48 overflow-y-auto">
+                        {task.output}
+                      </pre>
+                    </details>
+                  )}
+                  <div className="flex gap-2 mt-4">
+                    {task.status === "pending" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => cancelTask.mutate({ id: task.id })}
+                        disabled={cancelTask.isPending}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {(task.status === "completed" || task.status === "failed" || task.status === "cancelled") && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteTask.mutate({ id: task.id })}
+                        disabled={deleteTask.isPending}
+                      >
+                        Delete
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="text-center mt-12">
+          <p className="text-xs text-muted-foreground">
+            Agent runner: <code className="glass px-2 py-1 rounded">npx tsx scripts/agent-runner.ts</code>
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}

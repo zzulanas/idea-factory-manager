@@ -1,0 +1,156 @@
+#!/usr/bin/env npx tsx
+/**
+ * Agent Runner - Background process that picks up pending tasks and executes them
+ * using OpenCode CLI agent.
+ * 
+ * Usage: npx tsx scripts/agent-runner.ts
+ */
+
+import { spawn } from 'child_process';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import { eq } from 'drizzle-orm';
+import * as schema from '../db/schema';
+
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error('DATABASE_URL not set');
+  process.exit(1);
+}
+
+const client = postgres(DATABASE_URL);
+const db = drizzle(client, { schema });
+
+const POLL_INTERVAL = 5000; // 5 seconds
+const OPENCODE_PATH = process.env.OPENCODE_PATH || 'opencode';
+
+async function getNextTask() {
+  const task = await db.query.agentTasks.findFirst({
+    where: eq(schema.agentTasks.status, 'pending'),
+    orderBy: [schema.agentTasks.createdAt],
+  });
+  return task;
+}
+
+async function updateTaskStatus(
+  id: string, 
+  status: schema.TaskStatus, 
+  extra?: { output?: string; error?: string; branchName?: string; commitHash?: string }
+) {
+  const updateData: Record<string, unknown> = { 
+    status, 
+    ...extra, 
+    updatedAt: new Date() 
+  };
+  
+  if (status === 'running') {
+    updateData.startedAt = new Date();
+  }
+  if (status === 'completed' || status === 'failed') {
+    updateData.completedAt = new Date();
+  }
+  
+  await db
+    .update(schema.agentTasks)
+    .set(updateData)
+    .where(eq(schema.agentTasks.id, id));
+}
+
+async function runAgent(task: schema.AgentTask): Promise<{ success: boolean; output: string; error?: string }> {
+  return new Promise((resolve) => {
+    console.log(`[Agent] Running task: ${task.title}`);
+    console.log(`[Agent] Project: ${task.projectPath}`);
+    console.log(`[Agent] Prompt: ${task.prompt.substring(0, 100)}...`);
+
+    const args = [
+      '-p', task.prompt,
+      '-c', task.projectPath,
+      '-f', 'text',
+      '-q', // quiet mode (no spinner)
+    ];
+
+    const proc = spawn(OPENCODE_PATH, args, {
+      cwd: task.projectPath,
+      env: { 
+        ...process.env,
+        // Use the model from task if specified
+        ...(task.model && { ANTHROPIC_MODEL: task.model }),
+      },
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+      process.stdout.write(data);
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+      process.stderr.write(data);
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, output: stdout });
+      } else {
+        resolve({ success: false, output: stdout, error: stderr || `Exit code: ${code}` });
+      }
+    });
+
+    proc.on('error', (err) => {
+      resolve({ success: false, output: stdout, error: err.message });
+    });
+  });
+}
+
+async function processTask(task: schema.AgentTask) {
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`[Runner] Processing task: ${task.id}`);
+  console.log(`[Runner] Title: ${task.title}`);
+  console.log(`${'='.repeat(60)}\n`);
+
+  await updateTaskStatus(task.id, 'running');
+
+  try {
+    const result = await runAgent(task);
+    
+    if (result.success) {
+      await updateTaskStatus(task.id, 'completed', { output: result.output });
+      console.log(`\n[Runner] ✅ Task completed successfully`);
+    } else {
+      await updateTaskStatus(task.id, 'failed', { output: result.output, error: result.error });
+      console.log(`\n[Runner] ❌ Task failed: ${result.error}`);
+    }
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await updateTaskStatus(task.id, 'failed', { error: errorMsg });
+    console.error(`\n[Runner] ❌ Task error: ${errorMsg}`);
+  }
+}
+
+async function main() {
+  console.log('[Runner] Agent Runner started');
+  console.log(`[Runner] Polling interval: ${POLL_INTERVAL}ms`);
+  console.log(`[Runner] OpenCode path: ${OPENCODE_PATH}`);
+  
+  while (true) {
+    try {
+      const task = await getNextTask();
+      
+      if (task) {
+        await processTask(task);
+      } else {
+        process.stdout.write('.');
+      }
+    } catch (err) {
+      console.error('[Runner] Error:', err);
+    }
+    
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+  }
+}
+
+main().catch(console.error);
+
