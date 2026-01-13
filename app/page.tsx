@@ -8,7 +8,7 @@ import { Icon } from "@/components/ui/icon";
 import { ReviewDashboard } from "@/components/ReviewDashboard";
 import { ReviewWorkflow } from "@/components/ReviewWorkflow";
 import { trpc } from "@/lib/trpc/client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Clock, RotateCw, CheckCircle, XCircle, Ban, Factory, Eye } from "lucide-react";
 
 const statusColors: Record<string, string> = {
@@ -103,6 +103,22 @@ export default function Home() {
     setSearchQuery(query);
     setIsSearching(query.length > 0);
   };
+
+  // Keyboard shortcut handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        // Only submit if form is valid
+        if (title.trim() && prompt.trim() && selectedProject && !createTask.isPending) {
+          createTask.mutate({ title, prompt, projectPath: getProjectPath() });
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [title, prompt, selectedProject, createTask]);
 
   const displayTasks = isSearching ? searchResults : tasks;
   const displayLoading = isSearching ? isSearchLoading : isLoading;
@@ -216,8 +232,12 @@ export default function Home() {
                 variant="gradient"
                 type="submit"
                 disabled={createTask.isPending || !title.trim() || !prompt.trim() || !selectedProject}
+                className="flex items-center gap-2"
               >
                 {createTask.isPending ? "Creating..." : "Create Task"}
+                <kbd className="hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
+                  <span className="text-xs">⌘</span>G
+                </kbd>
               </Button>
             </form>
           </CardContent>
