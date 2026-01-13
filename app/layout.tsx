@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Idea Factory",
-  description: "Rapid prototyping with Next.js, tRPC, Drizzle, and more",
+  title: "Idea Factory Manager",
+  description: "Background agent task queue for the Idea Factory",
 };
 
 export default function RootLayout({
