@@ -1,3 +1,4 @@
+<!-- PR workflow test -->
 # Idea Factory Template
 
 A modern, full-stack Next.js template for rapid prototyping, designed for seamless cloud portability and AI-assisted development.
