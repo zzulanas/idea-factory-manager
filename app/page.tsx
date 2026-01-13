@@ -287,13 +287,13 @@ export default function Home() {
               <Card key={task.id} variant="glass">
                 <CardHeader className="pb-2">
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                    <div className="flex-1 min-w-0 overflow-hidden">
+                      <div className="flex items-center gap-2 mb-1 min-w-0">
                         <Icon icon={statusIcons[task.status]} className="h-4 w-4 shrink-0" />
-                        <CardTitle className="text-lg truncate">{task.title}</CardTitle>
+                        <CardTitle className="text-lg truncate min-w-0 flex-1">{task.title}</CardTitle>
                         <Badge className={`${statusColors[task.status]} shrink-0 sm:hidden text-[10px] px-2 py-0.5`}>{task.status}</Badge>
                       </div>
-                      <CardDescription className="line-clamp-2">{task.prompt}</CardDescription>
+                      <CardDescription className="line-clamp-2 break-words">{task.prompt}</CardDescription>
                     </div>
                     <Badge className={`${statusColors[task.status]} shrink-0 hidden sm:inline-flex`}>{task.status}</Badge>
                   </div>
