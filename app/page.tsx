@@ -59,14 +59,16 @@ export default function Home() {
     onSuccess: () => utils.tasks.list.invalidate(),
   });
 
-  // Get the selected project's git URL for the task
+  // Get the selected project's local path for the agent runner
   const getProjectPath = () => {
     if (!selectedProject || !projects) return "";
     const project = projects.find((p) => p.projectId === selectedProject);
-    if (!project || project.applications.length === 0) return "";
-    // Use the first application's git URL or fall back to a local path
+    if (!project) return "";
+    // Use local path - extract project name from the first app's git URL or project name
     const app = project.applications[0];
-    return app.gitUrl || `/home/zzula/projects/${project.name.toLowerCase().replace(/\s+/g, '-')}`;
+    // Extract repo name from git URL like "https://github.com/zzulanas/idea-factory-template.git"
+    const repoName = app?.gitUrl?.match(/\/([^/]+?)(?:\.git)?$/)?.[1] || project.name.toLowerCase().replace(/\s+/g, '-');
+    return `/home/zzula/projects/${repoName}`;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
