@@ -14,10 +14,11 @@ interface ReviewWorkflowProps {
   status: string;
   previewUrl?: string | null;
   branchName?: string | null;
+  prUrl?: string | null;
   onStatusChange?: () => void;
 }
 
-export function ReviewWorkflow({ taskId, status, previewUrl, branchName, onStatusChange }: ReviewWorkflowProps) {
+export function ReviewWorkflow({ taskId, status, previewUrl, branchName, prUrl, onStatusChange }: ReviewWorkflowProps) {
   const [rejectReason, setRejectReason] = useState('');
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
 
@@ -71,8 +72,19 @@ export function ReviewWorkflow({ taskId, status, previewUrl, branchName, onStatu
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {previewUrl && (
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {prUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(prUrl, '_blank')}
+              className="flex items-center gap-2"
+            >
+              <ExternalLink className="h-4 w-4" />
+              View Pull Request
+            </Button>
+          )}
+          {previewUrl && (
             <Button
               variant="outline"
               size="sm"
@@ -81,13 +93,9 @@ export function ReviewWorkflow({ taskId, status, previewUrl, branchName, onStatu
             >
               <Eye className="h-4 w-4" />
               View Preview
-              <ExternalLink className="h-4 w-4" />
             </Button>
-            <span className="text-sm text-gray-600">
-              Preview deployment is ready
-            </span>
-          </div>
-        )}
+          )}
+        </div>
         
         <div className="flex gap-2">
           <Button

@@ -347,6 +347,7 @@ export default function Home() {
                         status={task.status}
                         previewUrl={task.previewUrl}
                         branchName={task.branchName}
+                        prUrl={task.prUrl}
                         onStatusChange={() => {
                           utils.tasks.list.invalidate();
                           utils.tasks.getReviewTasks.invalidate();

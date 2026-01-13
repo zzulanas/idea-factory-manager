@@ -41,13 +41,15 @@ async function getNextTask() {
 }
 
 async function updateTaskStatus(
-  id: string, 
-  status: schema.TaskStatus, 
-  extra?: { 
-    output?: string; 
-    error?: string; 
-    branchName?: string; 
+  id: string,
+  status: schema.TaskStatus,
+  extra?: {
+    output?: string;
+    error?: string;
+    branchName?: string;
     commitHash?: string;
+    prUrl?: string;
+    prNumber?: number;
     previewUrl?: string;
     previewDeploymentId?: string;
   }
@@ -138,7 +140,14 @@ async function runGitCommand(args: string[], cwd: string): Promise<{ success: bo
   });
 }
 
-async function commitAndPush(task: schema.AgentTask): Promise<{ success: boolean; branchName?: string; commitHash?: string; error?: string }> {
+async function commitAndPush(task: schema.AgentTask): Promise<{
+  success: boolean;
+  branchName?: string;
+  commitHash?: string;
+  prUrl?: string;
+  prNumber?: number;
+  error?: string
+}> {
   const cwd = task.projectPath;
   console.log(`[Git] Checking for changes in ${cwd}`);
 
@@ -151,14 +160,28 @@ async function commitAndPush(task: schema.AgentTask): Promise<{ success: boolean
 
   console.log(`[Git] Changes detected:\n${status.output}`);
 
-  // Get current branch name
-  const branchResult = await runGitCommand(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
-  const branchName = branchResult.output.trim();
-  console.log(`[Git] Current branch: ${branchName}`);
+  // Get current branch (should be main)
+  const mainBranchResult = await runGitCommand(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const mainBranch = mainBranchResult.output.trim();
+  console.log(`[Git] Current branch: ${mainBranch}`);
+
+  // Create a feature branch for this task
+  const shortId = task.id.substring(0, 8);
+  const slugTitle = task.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 30);
+  const featureBranch = `agent/${shortId}-${slugTitle}`;
+  console.log(`[Git] Creating feature branch: ${featureBranch}`);
+
+  // Create and checkout the feature branch
+  const checkoutResult = await runGitCommand(['checkout', '-b', featureBranch], cwd);
+  if (!checkoutResult.success) {
+    return { success: false, error: `Failed to create branch: ${checkoutResult.output}` };
+  }
 
   // Stage all changes (excluding .opencode/)
   const addResult = await runGitCommand(['add', '-A'], cwd);
   if (!addResult.success) {
+    // Switch back to main before returning
+    await runGitCommand(['checkout', mainBranch], cwd);
     return { success: false, error: `Failed to stage changes: ${addResult.output}` };
   }
 
@@ -166,6 +189,7 @@ async function commitAndPush(task: schema.AgentTask): Promise<{ success: boolean
   const commitMessage = `feat: ${task.title}\n\nTask ID: ${task.id}\nAutomated commit by agent-runner`;
   const commitResult = await runGitCommand(['commit', '-m', commitMessage], cwd);
   if (!commitResult.success) {
+    await runGitCommand(['checkout', mainBranch], cwd);
     return { success: false, error: `Failed to commit: ${commitResult.output}` };
   }
 
@@ -174,71 +198,156 @@ async function commitAndPush(task: schema.AgentTask): Promise<{ success: boolean
   const commitHash = hashResult.output.trim().substring(0, 7);
   console.log(`[Git] Committed: ${commitHash}`);
 
-  // Push to remote
-  console.log(`[Git] Pushing to origin/${branchName}`);
-  const pushResult = await runGitCommand(['push', 'origin', branchName], cwd);
+  // Push the feature branch to remote
+  console.log(`[Git] Pushing to origin/${featureBranch}`);
+  const pushResult = await runGitCommand(['push', '-u', 'origin', featureBranch], cwd);
   if (!pushResult.success) {
-    return { success: false, branchName, commitHash, error: `Failed to push: ${pushResult.output}` };
+    await runGitCommand(['checkout', mainBranch], cwd);
+    return { success: false, branchName: featureBranch, commitHash, error: `Failed to push: ${pushResult.output}` };
   }
 
   console.log(`[Git] ✅ Pushed successfully`);
-  return { success: true, branchName, commitHash };
+
+  // Create a Pull Request using GitHub CLI
+  const prResult = await createPullRequest(task, featureBranch, mainBranch, cwd);
+
+  // Switch back to main branch
+  await runGitCommand(['checkout', mainBranch], cwd);
+
+  if (!prResult.success) {
+    return {
+      success: true, // Branch pushed successfully, just PR failed
+      branchName: featureBranch,
+      commitHash,
+      error: `Branch pushed but PR creation failed: ${prResult.error}`
+    };
+  }
+
+  return {
+    success: true,
+    branchName: featureBranch,
+    commitHash,
+    prUrl: prResult.prUrl,
+    prNumber: prResult.prNumber
+  };
 }
 
-async function createPreviewDeployment(
-  projectPath: string, 
-  branchName: string, 
-  commitHash: string
+async function createPullRequest(
+  task: schema.AgentTask,
+  featureBranch: string,
+  baseBranch: string,
+  cwd: string
+): Promise<{ success: boolean; prUrl?: string; prNumber?: number; error?: string }> {
+  console.log(`[PR] Creating Pull Request: ${featureBranch} -> ${baseBranch}`);
+
+  return new Promise((resolve) => {
+    const prTitle = `feat: ${task.title}`;
+    const prBody = `## Task
+${task.title}
+
+## Description
+${task.prompt.substring(0, 500)}${task.prompt.length > 500 ? '...' : ''}
+
+---
+*Task ID: ${task.id}*
+*Created automatically by Agent Runner*`;
+
+    const args = [
+      'pr', 'create',
+      '--title', prTitle,
+      '--body', prBody,
+      '--base', baseBranch,
+      '--head', featureBranch,
+    ];
+
+    const proc = spawn('gh', args, { cwd });
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        // gh pr create outputs the PR URL on success
+        const prUrl = stdout.trim();
+        // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
+        const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+        const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : undefined;
+
+        console.log(`[PR] ✅ Pull Request created: ${prUrl}`);
+        resolve({ success: true, prUrl, prNumber });
+      } else {
+        console.log(`[PR] ❌ Failed to create PR: ${stderr || stdout}`);
+        resolve({ success: false, error: stderr || stdout || `Exit code: ${code}` });
+      }
+    });
+
+    proc.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+}
+
+async function waitForPreviewDeployment(
+  projectPath: string,
+  branchName: string,
+  maxWaitSeconds: number = 60
 ): Promise<{ success: boolean; previewUrl?: string; deploymentId?: string; error?: string }> {
   const appId = PROJECT_APP_IDS[projectPath];
   if (!appId) {
-    console.log(`[Preview] No Dokploy app ID mapped for ${projectPath}, skipping preview deployment`);
-    return { success: true }; // Not an error, just no deployment configured
+    console.log(`[Preview] No Dokploy app ID mapped for ${projectPath}, skipping preview check`);
+    return { success: true };
   }
 
   if (!DOKPLOY_API_KEY) {
-    console.log('[Preview] DOKPLOY_API_KEY not set, skipping preview deployment');
-    return { success: true }; // Not an error, just no API key
+    console.log('[Preview] DOKPLOY_API_KEY not set, skipping preview check');
+    return { success: true };
   }
 
-  console.log(`[Preview] Creating preview deployment for app ${appId}, branch ${branchName}`);
+  console.log(`[Preview] Waiting for preview deployment for branch ${branchName} (max ${maxWaitSeconds}s)`);
 
-  try {
-    const response = await fetch(`${DOKPLOY_URL}/api/trpc/application.createPreview`, {
-      method: 'POST',
-      headers: {
-        'x-api-key': DOKPLOY_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ 
-        json: { 
-          applicationId: appId, 
-          branch: branchName,
-          commitHash: commitHash
-        } 
-      }),
-    });
+  const startTime = Date.now();
+  const pollInterval = 5000; // 5 seconds
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.log(`[Preview] ⚠️  Preview deployment failed: ${response.status} ${text}`);
-      return { success: false, error: `Preview deployment failed: ${response.status} ${text}` };
+  while (Date.now() - startTime < maxWaitSeconds * 1000) {
+    try {
+      const encodedInput = encodeURIComponent(JSON.stringify({ json: { applicationId: appId } }));
+      const response = await fetch(`${DOKPLOY_URL}/api/trpc/previewDeployment.all?input=${encodedInput}`, {
+        headers: { 'x-api-key': DOKPLOY_API_KEY },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const previews = data.result?.data?.json || [];
+
+        // Find a preview for our branch
+        const preview = previews.find((p: { branch: string }) => p.branch === branchName);
+        if (preview) {
+          console.log(`[Preview] ✅ Found preview deployment: ${preview.previewDeploymentId}`);
+
+          // Construct the preview URL based on Dokploy's pattern
+          // Usually it's something like: {previewDomain} or app-name-branch.domain
+          const previewUrl = preview.domain || `Preview for ${branchName}`;
+
+          return {
+            success: true,
+            previewUrl: previewUrl,
+            deploymentId: preview.previewDeploymentId
+          };
+        }
+      }
+    } catch (err) {
+      console.log(`[Preview] Error checking for preview: ${err}`);
     }
 
-    const data = await response.json();
-    const deployment = data.result?.data?.json;
-    
-    console.log('[Preview] ✅ Preview deployment created successfully');
-    return { 
-      success: true, 
-      previewUrl: deployment?.url,
-      deploymentId: deployment?.deploymentId
-    };
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.log(`[Preview] ⚠️  Preview deployment error: ${errorMsg}`);
-    return { success: false, error: `Preview deployment error: ${errorMsg}` };
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    process.stdout.write('.');
   }
+
+  console.log(`\n[Preview] ⚠️  No preview deployment found after ${maxWaitSeconds}s`);
+  return { success: true }; // Not a failure - preview might come later
 }
 
 async function processTask(task: schema.AgentTask) {
@@ -253,32 +362,34 @@ async function processTask(task: schema.AgentTask) {
     const result = await runAgent(task);
 
     if (result.success) {
-      // Commit and push changes
+      // Commit to feature branch, push, and create PR
       const gitResult = await commitAndPush(task);
 
       if (gitResult.success && gitResult.commitHash) {
-        // Create preview deployment (optional - task goes to review regardless)
-        const previewResult = await createPreviewDeployment(
-          task.projectPath, 
-          gitResult.branchName!, 
-          gitResult.commitHash
+        // Wait briefly for Dokploy to create preview deployment via webhook
+        const previewResult = await waitForPreviewDeployment(
+          task.projectPath,
+          gitResult.branchName!,
+          30 // Wait up to 30 seconds for preview
         );
 
-        // Always submit for review if git operations succeeded
+        // Submit for review with PR and preview info
         await updateTaskStatus(task.id, 'review', {
           output: result.output,
           branchName: gitResult.branchName,
           commitHash: gitResult.commitHash,
-          previewUrl: previewResult.success ? previewResult.previewUrl : undefined,
-          previewDeploymentId: previewResult.success ? previewResult.deploymentId : undefined,
+          prUrl: gitResult.prUrl,
+          prNumber: gitResult.prNumber,
+          previewUrl: previewResult.previewUrl,
+          previewDeploymentId: previewResult.deploymentId,
         });
-        
+
         console.log(`\n[Runner] ✅ Task completed and submitted for review`);
-        if (previewResult.success && previewResult.previewUrl) {
+        if (gitResult.prUrl) {
+          console.log(`[Runner] Pull Request: ${gitResult.prUrl}`);
+        }
+        if (previewResult.previewUrl) {
           console.log(`[Runner] Preview URL: ${previewResult.previewUrl}`);
-        } else if (!previewResult.success) {
-          console.log(`[Runner] ⚠️  Preview deployment failed: ${previewResult.error}`);
-          console.log(`[Runner] Task still submitted for review without preview`);
         }
       } else if (gitResult.success) {
         // No changes to commit, mark as completed

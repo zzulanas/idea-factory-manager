@@ -23,6 +23,8 @@ export const agentTasks = pgTable('agent_tasks', {
   error: text('error'),
   branchName: text('branch_name'),
   commitHash: text('commit_hash'),
+  prUrl: text('pr_url'),
+  prNumber: integer('pr_number'),
   previewUrl: text('preview_url'),
   previewDeploymentId: text('preview_deployment_id'),
   startedAt: timestamp('started_at'),
