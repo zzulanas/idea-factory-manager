@@ -23,6 +23,14 @@ const db = drizzle(client, { schema });
 
 const POLL_INTERVAL = 5000; // 5 seconds
 const OPENCODE_PATH = process.env.OPENCODE_PATH || 'opencode';
+const DOKPLOY_API_KEY = process.env.DOKPLOY_API_KEY || '';
+const DOKPLOY_URL = process.env.DOKPLOY_URL || 'http://localhost:3000';
+
+// Map project paths to Dokploy application IDs
+const PROJECT_APP_IDS: Record<string, string> = {
+  '/home/zzula/projects/idea-factory-manager': 'VmkFm8AScDwiiX0KNyNKL',
+  '/home/zzula/projects/idea-factory-template': 'HAZQTYfaNCUmsMVi4lBDu',
+};
 
 async function getNextTask() {
   const task = await db.query.agentTasks.findFirst({
@@ -170,6 +178,43 @@ async function commitAndPush(task: schema.AgentTask): Promise<{ success: boolean
   return { success: true, branchName, commitHash };
 }
 
+async function triggerDokployDeploy(projectPath: string): Promise<{ success: boolean; error?: string }> {
+  const appId = PROJECT_APP_IDS[projectPath];
+  if (!appId) {
+    console.log(`[Deploy] No Dokploy app ID mapped for ${projectPath}`);
+    return { success: true }; // Not an error, just no deployment configured
+  }
+
+  if (!DOKPLOY_API_KEY) {
+    console.log('[Deploy] DOKPLOY_API_KEY not set, skipping deployment');
+    return { success: true };
+  }
+
+  console.log(`[Deploy] Triggering Dokploy deployment for app ${appId}`);
+
+  try {
+    const response = await fetch(`${DOKPLOY_URL}/api/trpc/application.deploy`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': DOKPLOY_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ json: { applicationId: appId } }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { success: false, error: `Deploy failed: ${response.status} ${text}` };
+    }
+
+    console.log('[Deploy] ✅ Deployment triggered successfully');
+    return { success: true };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Deploy error: ${errorMsg}` };
+  }
+}
+
 async function processTask(task: schema.AgentTask) {
   console.log(`\n${'='.repeat(60)}`);
   console.log(`[Runner] Processing task: ${task.id}`);
@@ -186,6 +231,11 @@ async function processTask(task: schema.AgentTask) {
       const gitResult = await commitAndPush(task);
 
       if (gitResult.success) {
+        // Trigger Dokploy deployment if changes were pushed
+        if (gitResult.commitHash) {
+          await triggerDokployDeploy(task.projectPath);
+        }
+
         await updateTaskStatus(task.id, 'completed', {
           output: result.output,
           branchName: gitResult.branchName,
