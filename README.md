@@ -1,3 +1,4 @@
+<!-- PR workflow test -->
 # Idea Factory Template
 
 A modern, full-stack Next.js template for rapid prototyping, designed for seamless cloud portability and AI-assisted development.
@@ -278,3 +279,6 @@ Built with:
 ---
 
 **Ready to build?** Check out [CLAUDE_CODE.md](./CLAUDE_CODE.md) for detailed documentation and start creating! 🚀
+<\!-- Updated: Tue Jan 13 10:08:30 PM UTC 2026 -->
+<\!-- Webhook test: Tue Jan 13 10:13:49 PM UTC 2026 -->
+<\!-- Webhook test 2: Tue Jan 13 10:23:30 PM UTC 2026 -->
